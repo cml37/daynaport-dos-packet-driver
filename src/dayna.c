@@ -1,4 +1,4 @@
-/* daynaport.c - MS-DOS Packet Driver for DaynaPort SCSI/Link */
+/* daynaport.c - MS-DOS Packet Driver for DaynaPORT SCSI/Link */
 
 /* Load ASPI manager for your card (e.g. DEVICE=ASPI7DOS.SYS in CONFIG.SYS). */
 /* Run the driver: DAYNAPORT.EXE.
@@ -7,7 +7,6 @@
 
 /* NOTE: THIS IS VERY VERY BETA.  NO GUARANTEES.  NO PROMISES */
 
-/* TODO: hardcoded to 0x60 and SCSI ID 4.  Pass these in */
 /* TODO: When we get this wrapped, test with additional SCSI cards */
 /* TODO: Support driver unloading */
 
@@ -22,11 +21,6 @@
 #include <string.h>
 #include <conio.h>
 #include <malloc.h>
-
-/* Device constants which shouldn't be constants... */
-#define INT_VECTOR      0x60   /* Software interrupt for packet driver (TODO: Make this configurable) */
-#define DAYNA_SCSI_ID      4   /* Default SCSI ID for DaynaPORT (TODO: make this configurable) */
-#define ADAPTER_ID         0   /* Adaptec adapter number (TODO: make this optionally configurable) */
 
 /* Packet constants */
 #define MAX_PACKET_SIZE 1514   /* Max Ethernet packet size (incl. CRC) */
@@ -82,7 +76,6 @@ void interrupt (*old_timer_handler)();
 /* The polling tick counter*/
 int polling_tick_counter = DOS_TIMER_POLLING_TICKS;
 
-
 /* Packet driver header (placed at the start of the driver as required by the specification) */
 typedef struct PacketDriverHeader {
     unsigned char jmp_instruction[3]; /* JMP to entry point (3 bytes) */
@@ -132,9 +125,7 @@ far (* aspi_entry_point)(unsigned short, unsigned short) = 0;
 far (*driver_handle)() =  0;
 
 /* Packet receive buffer */
-/* TODO eliminate this double buffering, it's unnecessary */
 unsigned char recv_buffer[MAX_PACKET_SIZE];
-unsigned char far rx_buf[MAX_PACKET_SIZE + 8];
 
 /* Packet send buffer */
 unsigned char snd_bfr[MAX_PACKET_SIZE + 8];
@@ -146,19 +137,34 @@ struct PacketDriverHeader packet_driver_header = {
     { 0xEA, 0x00, 0x00, 0x00, 0x00}              /* JMP far will be set later */
 };
 
+/* Software interrupt for packet driver */
+unsigned char interrupt_vector = 0;
+
+/* SCSI ID for DaynaPORT */
+unsigned char scsi_id = 0;
+
+/* SCSI Adapter Number */
+unsigned char adapter_id = 0;
+
 /* Function Declarations */
-/* TODO: We're missing a few */
-void main(int argc, char *argv[]);
-void interrupt packet_driver_isr();
-int init_driver();
 int scsi_command(char command, ASPI_SRB *srb);
+int enable_interface();
+int get_mac_address(unsigned char far *result, unsigned short length);
+int init_driver();
+int send_packet(unsigned char *buffer, unsigned short length);
+int receive_packet(unsigned char far *buffer, unsigned short *length);
+void terminate_driver();
+void interrupt packet_driver_isr();
+void interrupt polling_dayanport();
+void print_usage_and_exit();
+void main(int argc, char *argv[]);
 
 /* Send SCSI command via ASPI */
 int scsi_command(char command, ASPI_SRB *srb) {
     unsigned short segmt = FP_SEG(srb);
     unsigned short ofst = FP_OFF(srb);
     int poll_counter;
-    srb->SRB_Target = DAYNA_SCSI_ID;
+    srb->SRB_Target = scsi_id;
     srb->SRB_Status = 0;
     srb->SRB_SenseLen = SENSE_LEN; /* Request up to SENSE_LEN bytes of sense data */
 
@@ -207,7 +213,7 @@ int enable_interface() {
 
     /* Enable DaynaPORT interface */
     memset(&srb, 0, sizeof(srb));
-    srb.SRB_HaId = ADAPTER_ID;
+    srb.SRB_HaId = adapter_id;
     srb.SRB_Flags = SRB_DIR_IN;
     srb.SRB_BufOffset = FP_OFF(cmd_enable);
     srb.SRB_BufSegment = FP_SEG(cmd_enable);
@@ -229,7 +235,7 @@ int get_mac_address(unsigned char far *result, unsigned short length) {
     unsigned char buffer[18];
 
     memset(&srb, 0, sizeof(ASPI_SRB));
-    srb.SRB_HaId = ADAPTER_ID;
+    srb.SRB_HaId = adapter_id;
     srb.SRB_Flags = SRB_DIR_IN;
     srb.SRB_BufLenLo = sizeof(buffer);
     srb.SRB_BufSegment = FP_SEG(buffer);
@@ -277,18 +283,14 @@ int init_driver() {
         int86x( 0x21, &inregs, &outregs, &segregs);
     }
 
-    if (!found) {
-        printf("No manager found\n");
-    }
-
     if (!FP_SEG(aspi_entry_point)) {
-        printf("ASPI entry point not found\n");
+        printf("ASPI entry point not found, did you load SCSI drivers in CONFIG.SYS?\n");
         return -1;
     }
 
     /* Send SCSI Inquiry to confirm DaynaPORT */
     memset(&srb, 0, sizeof(ASPI_SRB));
-    srb.SRB_HaId = ADAPTER_ID;
+    srb.SRB_HaId = adapter_id;
     srb.SRB_Flags = SRB_DIR_IN;
     srb.SRB_BufLenLo = sizeof(inquiry_data);
     memset(inquiry_data, 0, sizeof(inquiry_data));
@@ -299,7 +301,7 @@ int init_driver() {
        return -2;
     }
     if (strncmp((char*)inquiry_data + 8, "Dayna", 5) != 0) {
-        printf("DaynaPORT not found");
+        printf("DaynaPORT not found\n");
         return -3;
     }
 
@@ -317,7 +319,7 @@ int init_driver() {
     packet_driver_header.another_jump[4] = (unsigned char)((offset >> 24) & 0xFF);
 
     /* Set up interrupt vector */
-    setvect(INT_VECTOR, (void interrupt (*)(int))&packet_driver_header);
+    setvect(interrupt_vector, (void interrupt (*)(int))&packet_driver_header);
     printf("Driver initialized\n");
     return 0;
 }
@@ -337,7 +339,7 @@ int send_packet(unsigned char *buffer, unsigned short length) {
     snd_bfr[1] = length & 0xFF;
 
     memset(&srb, 0, sizeof(ASPI_SRB));
-    srb.SRB_HaId = ADAPTER_ID;
+    srb.SRB_HaId = adapter_id;
     srb.SRB_Flags = SRB_DIR_OUT;
     srb.SRB_BufLenLo = length + 8;
     srb.SRB_BufSegment = FP_SEG(snd_bfr);
@@ -345,34 +347,39 @@ int send_packet(unsigned char *buffer, unsigned short length) {
     return scsi_command(CMD_WRITE_PACKET, &srb);
 }
 
-/* Receive a packet */
+/* Receive a packet.  */
+/* Return back the location in the buffer where you should start reading data */
+/* Return -1 if there is a lost packet */
+/* Return -2 if there is no data to read */
 int receive_packet(unsigned char far *buffer, unsigned short *length) {
     ASPI_SRB srb;
     unsigned long flags;
 
     memset(&srb, 0, sizeof(srb));
-    srb.SRB_HaId = ADAPTER_ID;
+    srb.SRB_HaId = adapter_id;
     srb.SRB_Flags = SRB_DIR_IN;
     srb.SRB_BufLenLo = MAX_PACKET_SIZE + 8;
-    srb.SRB_BufSegment = FP_SEG(rx_buf);
-    srb.SRB_BufOffset = FP_OFF(rx_buf);
+    srb.SRB_BufSegment = FP_SEG(buffer);
+    srb.SRB_BufOffset = FP_OFF(buffer);
     if (scsi_command(CMD_READ_PACKET, &srb)) return -1;
 
-    *length = (rx_buf[0] << 8) | rx_buf[1];
-    memcpy(&flags, rx_buf + 2, 4);
+    *length = (buffer[0] << 8) | buffer[1];
+    memcpy(&flags, buffer + 2, 4);
     if (flags == 0xFFFFFFFF) {
-        return -2;
+        return -1;
     }
     if (*length > MAX_PACKET_SIZE) return -3;
 
     if (*length == 0) {
-      return -4;
+      return -2;
     }
 
     /* We do not want to send back the 4-byte CRC, so discard it */
     *length = *length - 4;
-    _fmemcpy(buffer, rx_buf + 6, *length);
-    return 0;
+
+    /* Skip past the first 6 bytes which are the length and flags */
+    /* This is a cheaper operation than doing a memcpy to another buffer! */
+    return 6;
 }
 
 /* Terminate the driver */
@@ -383,7 +390,7 @@ void terminate_driver() {
 
     /* Disable DaynaPORT interface */
     memset(&srb, 0, sizeof(srb));
-    srb.SRB_HaId = ADAPTER_ID;
+    srb.SRB_HaId = adapter_id;
     srb.SRB_Flags = SRB_DIR_IN;
     srb.SRB_BufSegment = FP_SEG(cmd_disable);
     srb.SRB_BufOffset = FP_OFF(cmd_disable);
@@ -391,7 +398,7 @@ void terminate_driver() {
     scsi_command(CMD_ENABLE_IF, &srb);
 
     /* Free resources */
-    setvect(INT_VECTOR, 0); /* Clear interrupt vector */
+    setvect(interrupt_vector, 0); /* Clear interrupt vector */
 
     /* Unlink the clock vector too */
     _dos_setvect(0x1C, old_timer_handler);
@@ -459,28 +466,28 @@ void interrupt packet_driver_isr() {
 
 /* Interrupt handler to poll for new packets! */
 void interrupt polling_dayanport() {
-    int result;
+    int position;
     unsigned short length;
 
     polling_tick_counter --;
     if (polling_tick_counter <=0) {
         polling_tick_counter = DOS_TIMER_POLLING_TICKS;
 
-        result = receive_packet(recv_buffer, &length);
-        if (result == 0) {
+        position = receive_packet(recv_buffer, &length);
+        if (position > 0) {
             if (driver_handle != 0 && length > 0) {
                 _AX = 0;
                 _CX = length;
                 _BX = 0;
                 (*driver_handle)();
                 if (_ES !=0 || _DI != 0) {
-                    memcpy(MK_FP(_ES,_DI),recv_buffer, length);
+                    memcpy(MK_FP(_ES,_DI),recv_buffer + position, length);
                     _AX = 1;
                     _BX = 0;
                     (*driver_handle)();
                 }
             }
-        } else if (result == -2) {
+        } else if (position == -1) {
             /* Per the spec, if we get back a lost packet result, we should re-enable the interface */
             /* TODO we might have to toggle through a disable cycle too.  We shall see...           */
             enable_interface();
@@ -489,15 +496,38 @@ void interrupt polling_dayanport() {
     _chain_intr(old_timer_handler);
 }
 
+/* Prints program usage and... well... exits! I know, right? */
+void print_usage_and_exit() {
+    printf("\nUsage: dayna.exe vector scsi_id <adapter_id>\n");
+    printf("Example dayna.exe 0x60 4\n");
+    exit(-1);
+}
+
 /* Main function */
-void main() {
+void main(int argc, char *argv[]) {
+    if (argc < 3) {
+        print_usage_and_exit();
+    }
+
+    interrupt_vector = (unsigned char) strtol(argv[1], NULL, 16);
+    if (interrupt_vector < 0x60 || interrupt_vector > 0x80) {
+        print_usage_and_exit();
+    }
+
+    scsi_id = atoi(argv[2]);
+
+    if (argc > 3) {
+        adapter_id = atoi(argv[3]);
+    }
+
     printf("DaynaPORT SCSI/Link Packet Driver\n");
     if (init_driver() != 0) {
         printf("Initialization failed\n");
         return;
     }
 
-    printf("Driver installed at interrupt 0x%02X\n", INT_VECTOR);
+    printf("Driver installed at 0x%02X for SCSI ID %d and Adapter ID %d\n",
+        interrupt_vector, scsi_id, adapter_id);
 
     /* Set up polling for packet receive, we'll hook the DOS timer software interrupt */
     old_timer_handler = getvect(0x1C);
