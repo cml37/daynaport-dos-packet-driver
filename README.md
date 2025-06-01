@@ -22,7 +22,7 @@ Simple!
 1. `dayna.exe vector scsi_id <adapter_id>`
   * Note that the adapter_id is optional and defaults to zero
   * Note that valid vector numbers range from 0x60 to 0x80
-  * example command: `dayna.exe 0x60 4`
+  * Example command: `dayna.exe 0x60 4`
 2. From there you can configure mTCP or your favorite program that uses a packet driver!
 
 ## Unloading
@@ -34,5 +34,5 @@ Uhh... we'll get back to you on that
 2. Uses too much memory
 3. Needs testing with different SCSI cards
 4. Only supports class 1 operations (which is fine for packet drivers, but suboptimal)
-   *  Well, some of them.  Not Terminate.  Not Reset Interface.  Did I mention this is very Beta, maybe even Alpha?
 5. Responds to all packet types, independent of what the client request
+6. Crashes under load
