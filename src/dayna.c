@@ -476,6 +476,7 @@ void interrupt polling_dayanport() {
     if (polling_tick_counter <=0) {
         polling_tick_counter = DOS_TIMER_POLLING_TICKS;
 
+        /* TODO: this call will block on I/O, which will starve the interrupt handling. Make this call multi-part. */
         position = receive_packet(recv_buffer, &length);
         if (position > 0) {
             if (driver_handle != 0 && length > 0) {
