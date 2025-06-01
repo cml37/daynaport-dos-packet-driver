@@ -385,7 +385,7 @@ int receive_packet(unsigned char far *buffer, unsigned short *length) {
 }
 
 /* Terminate the driver */
-/* TODO currently unused and untested */
+/* TODO: currently unused and untested */
 void terminate_driver() {
     ASPI_SRB srb;
     unsigned char cmd_disable[6] = {CMD_ENABLE_IF, 0, 0, 0, 0, 0};
@@ -428,11 +428,11 @@ void interrupt packet_driver_isr() {
     /* We use "raw register values.                                                          */
     /* If you do something like call a "printf" here, you'll for sure clobber your registers */
 
-    /* TODO eventually we might want to expand to support more than class 1 support */
+    /* TODO: eventually we might want to expand to support more than class 1 support */
     switch (function) {
         case DRIVER_INFO:
             /* Return driver info (class=1 for Ethernet, type=unknown, number=1) */
-            /* TODO this is not quite compliant with the spec, I believe.  Address */
+            /* TODO: this is not quite compliant with the spec, I believe.  Address */
            _AX = 100;
            _BX = 1;
            _CX = 1;
@@ -449,17 +449,17 @@ void interrupt packet_driver_isr() {
             break;
         case SEND_PKT:
             send_packet(MK_FP(DS, _SI), _CX);
-            /* TODO I think we are supposed to send the sent length back in CX */
+            /* TODO: I think we are supposed to send the sent length back in CX */
             break;
         case GET_ADDRESS:
             get_mac_address(MK_FP(_ES,_DI), _CX);
-            /* TODO I think we are supposed to send the total length back in CX */
+            /* TODO: I think we are supposed to send the total length back in CX */
             break;
         case TERMINATE:
-            /* TODO we should probably do something here */
+            /* TODO: we should probably do something here */
             break;
         case RESET_INTERFACE:
-            /* TODO we should probably do something here */
+            /* TODO: we should probably do something here */
             break;
         default:
             _AX = 0xFF;
@@ -491,7 +491,7 @@ void interrupt polling_dayanport() {
             }
         } else if (position == -1) {
             /* Per the spec, if we get back a lost packet result, we should re-enable the interface */
-            /* TODO we might have to toggle through a disable cycle too.  We shall see...           */
+            /* TODO: we might have to toggle through a disable cycle too.  We shall see...           */
             enable_interface();
         }
     }
@@ -502,7 +502,7 @@ void interrupt polling_dayanport() {
 void print_usage_and_exit() {
     printf("\nUsage: dayna.exe vector scsi_id <adapter_id>\n");
     printf("Example dayna.exe 0x60 4\n");
-    exit(-1);
+    exit(1);
 }
 
 /* Main function */
@@ -535,6 +535,6 @@ void main(int argc, char *argv[]) {
     old_timer_handler = getvect(0x1C);
     setvect(0x1C, polling_dayanport);
 
-    /* TODO find real size that we need, this is probably overkill */
+    /* TODO: find real size that we need, this is probably overkill */
     keep(0, 10000);
 }
