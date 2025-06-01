@@ -3,7 +3,7 @@
 The most excellent references that made this driver possible!
 * [DaynaPORT Command Set](https://github.com/PiSCSI/piscsi/wiki/Dayna-Port-Command-Set)
 * [Adaptec ASPI SDK](https://tinkerdifferent.com/threads/adaptec-aspi-sdk-dos-windows-3-x-16bit-scsi-development.3466)
-* [PC/TCP Packet Driver](Specification: https://web.archive.org/web/20221127060523/http://crynwr.com/packet_driver.html)
+* [PC/TCP Packet Driver Specification](https://web.archive.org/web/20221127060523/http://crynwr.com/packet_driver.html)
 * [DaynaPORT BlueSCSI Code](https://github.com/BlueSCSI/BlueSCSI-v2/blob/main/lib/SCSI2SD/src/firmware/network.c)
 
 
