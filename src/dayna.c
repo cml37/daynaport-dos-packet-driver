@@ -403,6 +403,7 @@ void terminate_driver() {
     setvect(interrupt_vector, 0); /* Clear interrupt vector */
 
     /* Unlink the clock vector too */
+    /* TODO: this may clobber any handlers that came along later. If so, fix. */
     _dos_setvect(0x1C, old_timer_handler);
 }
 
