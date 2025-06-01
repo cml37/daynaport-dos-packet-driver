@@ -240,6 +240,7 @@ int enable_interface(int enable) {
 }
 
 /* Get the DaynaPORT MAC Address */
+/* Returns the length of the MAC address */
 int get_mac_address(unsigned char far *result, unsigned short length) {
     ASPI_SRB srb;
     unsigned char buffer[18];
@@ -251,10 +252,10 @@ int get_mac_address(unsigned char far *result, unsigned short length) {
     srb.SRB_BufSegment = FP_SEG(buffer);
     srb.SRB_BufOffset = FP_OFF(buffer);
     if (scsi_command(CMD_RETRIEVE_STATUS, &srb)) {
-        return -2;
+        return 0;
     }
     memcpy(result,buffer,length);
-    return 0;
+    return length;
 }
 
 /* Initialize the driver */
@@ -437,21 +438,53 @@ void interrupt packet_driver_isr() {
     /* We use "raw register values.                                                          */
     /* If you do something like call a "printf" here, you'll for sure clobber your registers */
 
+    /* BAD HACK ALERT: When the ISR finishes, the registers will "pop".  So we need to travel */
+    /* back in the stack and "fix" the values with the return values we want.                  */
+
     /* TODO: eventually we might want to expand to support more than class 1 support */
     switch (function) {
         case DRIVER_INFO:
             /* Return driver info (class=1 for Ethernet, type=unknown, number=1) */
-            /* TODO: this is not quite compliant with the spec, I believe.  Address */
-           _AX = 100;
-           _BX = 1;
-           _CX = 1;
-           _DX = 0;
+            _BX = 1;
+            _CH = 1;
+            _DX = 0xFF;
+            _CL = 0;
+            _AL = 1;
+
+            asm {
+                push bp
+                mov bp,sp
+                mov word ptr 0x16[bp], ax
+                mov word ptr 0x14[bp], bx
+                mov word ptr 0x12[bp], cx
+                mov word ptr 0x10[bp], dx
+                pop bp
+            }
+
+            _AX = FP_SEG(driver_name);
+            _BX = FP_OFF(driver_name);
+
+            asm {
+                push bp
+                mov bp,sp
+                mov word ptr 0x0c[bp], ax
+                mov word ptr 0x0a[bp], bx
+                pop bp
+                clc
+            }
             break;
         case ACCESS_TYPE:
             /* Simplified: accept any type and we will only save off one handle */
             /* TODO: Create a handle table, and only process the types requested */
             driver_handle=(MK_FP(_ES,_DI));
             _AX = 0;
+            asm {
+                push bp
+                mov bp,sp
+                mov word ptr 0x16[bp], ax
+                pop bp
+                clc
+            }
             break;
         case RELEASE_TYPE:
             driver_handle = 0;
@@ -462,8 +495,14 @@ void interrupt packet_driver_isr() {
             asm { clc }
             break;
         case GET_ADDRESS:
-            get_mac_address(MK_FP(_ES,_DI), _CX);
-            /* TODO: I think we are supposed to send the total length back in CX */
+            _CX = get_mac_address(MK_FP(_ES,_DI), _CX);
+            asm {
+                push bp
+                mov bp,sp
+                mov word ptr 0x12[bp], cx
+                pop bp
+                clc
+            }
             break;
         case TERMINATE:
             /* TODO: we should probably do something here */
@@ -476,6 +515,13 @@ void interrupt packet_driver_isr() {
             break;
         default:
             _AX = 0xFF;
+            asm {
+                push bp
+                mov bp,sp
+                mov word ptr 0x16[bp], ax
+                pop bp
+                clc
+            }
     }
 }
 
