@@ -27,5 +27,5 @@ Uhh... we'll get back to you on that
 3. Needs testing with different SCSI cards
 4. Hardcoded to Adapter 0, SCSI device 4, and Packet Interrupt 0x60
 5. Only supports class 1 operations (which is fine for packet drivers, but suboptimal)
- * Well, some of them.  Not Terminate.  Not Reset Interface.  Did I mention this is very Beta, maybe even Alpha?
+   ** Well, some of them.  Not Terminate.  Not Reset Interface.  Did I mention this is very Beta, maybe even Alpha?
 6. Responds to all packet types, independent of what the client requests
