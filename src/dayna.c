@@ -538,5 +538,5 @@ void main(int argc, char *argv[]) {
     setvect(0x1C, polling_dayanport);
 
     /* TODO: find real size that we need, this is probably overkill */
-    keep(0, 10000);
+    keep(0, (_SS + (_SP/16) - _psp));
 }
