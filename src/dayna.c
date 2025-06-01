@@ -5,6 +5,8 @@
    The driver installs at interrupt 0x60 and stays resident.
 */
 
+/* NOTE: This program uses the Compact memory model since far pointers are present and utilized! */
+
 /* NOTE: THIS IS VERY VERY BETA.  NO GUARANTEES.  NO PROMISES */
 
 /* TODO: When we get this wrapped, test with additional SCSI cards */

@@ -12,6 +12,11 @@ The most excellent references that made this driver possible!
 2. Launch it and open the DAYNA.PRJ file
 3. From there Compile | Build All and you will have an .EXE!
 
+If you would rather create your own Turbo C++ project file, or wish to try and port this to another compiler, note the following:
+* All source code is present in `DAYNA.C`
+* You'll want to use the Compact memory model since this application uses far pointers
+   * Options | Compiler | Code Generation | Compact
+
 ## Running
 Simple! 
 1. `dayna.exe vector scsi_id <adapter_id>`
