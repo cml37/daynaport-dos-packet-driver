@@ -9,7 +9,7 @@ The most excellent references that made this driver possible!
 
 ## Building
 1. Download and install Borland Turbo C++ 3.x for DOS
-2. Launch it and open the DAYNA.PRJ file
+2. Launch it and open the `DAYNA.PRJ` file
 3. From there Compile | Build All and you will have an .EXE!
 
 If you would rather create your own Turbo C++ project file, or wish to try and port this to another compiler, note the following:
