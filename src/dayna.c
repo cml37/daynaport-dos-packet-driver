@@ -81,7 +81,7 @@ int polling_tick_counter = DOS_TIMER_POLLING_TICKS;
 /* Packet driver header (placed at the start of the driver as required by the specification) */
 typedef struct PacketDriverHeader {
     unsigned char jmp_instruction[3]; /* JMP to entry point (3 bytes) */
-    char signature[8];               /* "PKT DRVR" signature */
+    char signature[9];               /* "PKT DRVR" signature */
     unsigned char another_jump[5];
 };
 
@@ -134,10 +134,13 @@ unsigned char snd_bfr[MAX_PACKET_SIZE + 8];
 
 /* The packet driver header, which is required per the specification */
 struct PacketDriverHeader packet_driver_header = {
-    { 0xEB, 0x09, 0x90 },                        /* JMP short to next jump, plus a NOP */
-    { 'P', 'K', 'T', ' ', 'D', 'R', 'V', 'R' },
+    { 0xEB, 0x0A, 0x90 },                        /* JMP short to next jump, plus a NOP */
+    { 'P', 'K', 'T', ' ', 'D', 'R', 'V', 'R', 0 },
     { 0xEA, 0x00, 0x00, 0x00, 0x00}              /* JMP far will be set later */
 };
+
+/* The name of the driver */
+const char *driver_name = "RTC DaynaPort";
 
 /* Software interrupt for packet driver */
 unsigned char interrupt_vector = 0;
@@ -150,7 +153,7 @@ unsigned char adapter_id = 0;
 
 /* Function Declarations */
 int scsi_command(char command, ASPI_SRB *srb);
-int enable_interface();
+int enable_interface(int enable);
 int get_mac_address(unsigned char far *result, unsigned short length);
 int init_driver();
 int send_packet(unsigned char *buffer, unsigned short length);
@@ -208,10 +211,14 @@ int scsi_command(char command, ASPI_SRB *srb) {
     return 0;
 }
 
-/* Enable the DaynaPORT Interface */
-int enable_interface() {
+/* Enable or Disable the DaynaPORT Interface */
+int enable_interface(int enable) {
     ASPI_SRB srb;
     unsigned char cmd_enable[6] = {CMD_ENABLE_IF, 0, 0, 0, 0, 0x80};
+
+    if (!enable) {
+        cmd_enable[5] = 0x00;
+    }
 
     /* Enable DaynaPORT interface */
     memset(&srb, 0, sizeof(srb));
@@ -226,6 +233,7 @@ int enable_interface() {
     } else {
         printf("Enable interface succeeded\n");
         /* Need to sleep for at least half a second per docs */
+        /* TODO: Consider letting the caller handle the sleep, otherwise the caller will pause */
         delay(500);
     }
     return 0;
@@ -307,7 +315,7 @@ int init_driver() {
         return -3;
     }
 
-    if (enable_interface()) {
+    if (enable_interface(1)) {
         return -4;
     }
 
@@ -447,10 +455,11 @@ void interrupt packet_driver_isr() {
             break;
         case RELEASE_TYPE:
             driver_handle = 0;
+            asm { clc }
             break;
         case SEND_PKT:
             send_packet(MK_FP(DS, _SI), _CX);
-            /* TODO: I think we are supposed to send the sent length back in CX */
+            asm { clc }
             break;
         case GET_ADDRESS:
             get_mac_address(MK_FP(_ES,_DI), _CX);
@@ -458,9 +467,12 @@ void interrupt packet_driver_isr() {
             break;
         case TERMINATE:
             /* TODO: we should probably do something here */
+            asm { clc }
             break;
         case RESET_INTERFACE:
-            /* TODO: we should probably do something here */
+            enable_interface(0);
+            enable_interface(1);
+            asm { clc }
             break;
         default:
             _AX = 0xFF;
@@ -493,8 +505,8 @@ void interrupt polling_dayanport() {
             }
         } else if (position == -1) {
             /* Per the spec, if we get back a lost packet result, we should re-enable the interface */
-            /* TODO: we might have to toggle through a disable cycle too.  We shall see...           */
-            enable_interface();
+            enable_interface(0);
+            enable_interface(1);
         }
     }
     _chain_intr(old_timer_handler);
