@@ -25,7 +25,7 @@
 #include <malloc.h>
 
 /* Packet constants */
-#define MAX_PACKET_SIZE 1514   /* Max Ethernet packet size (incl. CRC) */
+#define MAX_PACKET_SIZE 1522   /* Max Ethernet packet size (incl. Header, CRC and VLAN tags) */
 #define CDB_LEN            6   /* The length of the CDB packet */
 #define SENSE_LEN         14   /* The length of the sense packet */
 
@@ -70,7 +70,7 @@
 
 /* The number of DOS timer polling ticks to wait before looking for a new incoming packet */
 /* Less ticks = more frequent checks                                                      */
-#define DOS_TIMER_POLLING_TICKS 2
+#define DOS_TIMER_POLLING_TICKS 1
 
 /* A pointer to the "old timer handler" for DOS timer polling */
 void interrupt (*old_timer_handler)();
@@ -126,8 +126,11 @@ far (* aspi_entry_point)(unsigned short, unsigned short) = 0;
 /* Packet driver handle that we will call back when we have a packet*/
 far (*driver_handle)() =  0;
 
+/* Whether an interrupt is being processed or not */
+unsigned char interrupt_service_in_process = 0;
+
 /* Packet receive buffer */
-unsigned char recv_buffer[MAX_PACKET_SIZE];
+unsigned char recv_buffer[MAX_PACKET_SIZE + 10];
 
 /* Packet send buffer */
 unsigned char snd_bfr[MAX_PACKET_SIZE + 8];
@@ -203,9 +206,6 @@ int scsi_command(char command, ASPI_SRB *srb) {
     /* For now, we will ignore errors, since legit sent packets come back with an error */
     /* We will also move on if in the pending status, which seems to be the case with received packets */
     if (srb->SRB_Status != SS_PENDING && srb->SRB_Status != SS_COMP && srb->SRB_Status != SS_ERR ) {
-        printf("SCSI error: status=%02x, sense[0]=%d\n", srb->SRB_Status, srb->SenseArea6[0]);
-        printf("Sense Key: %x, ASC: %x, ASCQ: %x\n",
-        srb->SenseArea6[2] & 0x0F, srb->SenseArea6[12], srb->SenseArea6[13]);
         return -1;
     }
     return 0;
@@ -228,10 +228,8 @@ int enable_interface(int enable) {
     srb.SRB_BufSegment = FP_SEG(cmd_enable);
     srb.SRB_BufLenLo = sizeof(cmd_enable);
     if (scsi_command(CMD_ENABLE_IF, &srb)) {
-        printf("Enable interface failed\n");
         return -1;
     } else {
-        printf("Enable interface succeeded\n");
         /* Need to sleep for at least half a second per docs */
         /* TODO: Consider letting the caller handle the sleep, otherwise the caller will pause */
         delay(500);
@@ -369,7 +367,7 @@ int receive_packet(unsigned char far *buffer, unsigned short *length) {
     memset(&srb, 0, sizeof(srb));
     srb.SRB_HaId = adapter_id;
     srb.SRB_Flags = SRB_DIR_IN;
-    srb.SRB_BufLenLo = MAX_PACKET_SIZE + 8;
+    srb.SRB_BufLenLo = MAX_PACKET_SIZE + 10;
     srb.SRB_BufSegment = FP_SEG(buffer);
     srb.SRB_BufOffset = FP_OFF(buffer);
     if (scsi_command(CMD_READ_PACKET, &srb)) return -1;
@@ -379,7 +377,8 @@ int receive_packet(unsigned char far *buffer, unsigned short *length) {
     if (flags == 0xFFFFFFFF) {
         return -1;
     }
-    if (*length > MAX_PACKET_SIZE) return -3;
+    /* We might be double counting here with the CRC, but allow for 4 bytes */
+    if (*length > MAX_PACKET_SIZE + 4) return -3;
 
     if (*length == 0) {
       return -2;
@@ -433,6 +432,8 @@ void interrupt packet_driver_isr() {
       pop bp
     }
     DS = _AX;
+
+    interrupt_service_in_process = 1;
 
     /* Don't do anything here that is not re-entrant or you will be sorry.                   */
     /* We use "raw register values.                                                          */
@@ -523,6 +524,7 @@ void interrupt packet_driver_isr() {
                 clc
             }
     }
+    interrupt_service_in_process = 0;
 }
 
 /* Interrupt handler to poll for new packets! */
@@ -534,25 +536,27 @@ void interrupt polling_dayanport() {
     if (polling_tick_counter <=0) {
         polling_tick_counter = DOS_TIMER_POLLING_TICKS;
 
-        /* TODO: this call will block on I/O, which will starve the interrupt handling. Make this call multi-part. */
-        position = receive_packet(recv_buffer, &length);
-        if (position > 0) {
-            if (driver_handle != 0 && length > 0) {
-                _AX = 0;
-                _CX = length;
-                _BX = 0;
-                (*driver_handle)();
-                if (_ES !=0 || _DI != 0) {
-                    memcpy(MK_FP(_ES,_DI),recv_buffer + position, length);
-                    _AX = 1;
+        if (interrupt_service_in_process == 0 ) {
+            /* TODO: this call will block on I/O, which will starve the interrupt handling. Make this call multi-part. */
+            position = receive_packet(recv_buffer, &length);
+            if (position > 0) {
+                if (driver_handle != 0 && length > 0) {
+                    _AX = 0;
+                    _CX = length;
                     _BX = 0;
                     (*driver_handle)();
+                    if (_ES !=0 || _DI != 0) {
+                        memcpy(MK_FP(_ES,_DI),recv_buffer + position, length);
+                        _AX = 1;
+                        _BX = 0;
+                        (*driver_handle)();
+                    }
                 }
+            } else if (position == -1) {
+                /* Per the spec, if we get back a lost packet result, we should re-enable the interface */
+                enable_interface(0);
+                enable_interface(1);
             }
-        } else if (position == -1) {
-            /* Per the spec, if we get back a lost packet result, we should re-enable the interface */
-            enable_interface(0);
-            enable_interface(1);
         }
     }
     _chain_intr(old_timer_handler);

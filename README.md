@@ -35,4 +35,3 @@ Uhh... we'll get back to you on that
 3. Needs testing with different SCSI cards
 4. Only supports class 1 operations (which is fine for packet drivers, but suboptimal)
 5. Responds to all packet types, independent of what the client request
-6. Crashes under load
